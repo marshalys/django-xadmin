@@ -1,10 +1,9 @@
-from django import forms
 from django import template
 from django.core.exceptions import PermissionDenied, ObjectDoesNotExist
 from django.db import models, transaction
 from django.forms.models import modelform_factory
 from django.http import Http404, HttpResponse
-from django.utils.encoding import force_unicode, smart_unicode
+from django.utils.encoding import force_text, smart_text
 from django.utils.html import escape, conditional_escape
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
@@ -42,9 +41,9 @@ class EditablePlugin(BaseAdminPlugin):
 
             item.wraps.insert(0, '<span class="editable-field">%s</span>')
             item.btns.append((
-                '<a class="editable-handler" title="%s" data-editable-field="%s" data-editable-loadurl="%s">'+
-                '<i class="icon-edit"></i></a>') %
-                 (_(u"Enter %s") % field_label, field_name, self.admin_view.model_admin_url('patch', pk) + '?fields=' + field_name))
+                '<a class="editable-handler" title="%s" data-editable-field="%s" data-editable-loadurl="%s">' +
+                '<i class="fa fa-edit"></i></a>') %
+                (_(u"Enter %s") % field_label, field_name, self.admin_view.model_admin_url('patch', pk) + '?fields=' + field_name))
 
             if field_name not in self.editable_need_fields:
                 self.editable_need_fields[field_name] = item.field
@@ -72,7 +71,7 @@ class EditPatchView(ModelFormAdminView, ListAdminView):
 
         if self.org_obj is None:
             raise Http404(_('%(name)s object with primary key %(key)r does not exist.') %
-                          {'name': force_unicode(self.opts.verbose_name), 'key': escape(object_id)})
+                          {'name': force_text(self.opts.verbose_name), 'key': escape(object_id)})
 
     def get_new_field_html(self, f):
         result = self.result_item(self.org_obj, f, {'is_display_first':
@@ -93,7 +92,7 @@ class EditPatchView(ModelFormAdminView, ListAdminView):
                     allow_tags = True
                     text = boolean_icon(value)
                 else:
-                    text = smart_unicode(value)
+                    text = smart_text(value)
             else:
                 if isinstance(f.rel, models.ManyToOneRel):
                     field_val = getattr(self.org_obj, f.name)
@@ -110,7 +109,7 @@ class EditPatchView(ModelFormAdminView, ListAdminView):
         model_fields = [f.name for f in self.opts.fields]
         fields = [f for f in request.GET['fields'].split(',') if f in model_fields]
         defaults = {
-            "form": forms.ModelForm,
+            "form": self.form,
             "fields": fields,
             "formfield_callback": self.formfield_for_dbfield,
         }
@@ -119,24 +118,24 @@ class EditPatchView(ModelFormAdminView, ListAdminView):
 
         helper = FormHelper()
         helper.form_tag = False
+        helper.include_media = False
         form.helper = helper
 
-        s = '{% load i18n crispy_forms_tags %}<form method="post" action="{{action_url}}">{% crispy form %}'+ \
+        s = '{% load i18n crispy_forms_tags %}<form method="post" action="{{action_url}}">{% crispy form %}' + \
             '<button type="submit" class="btn btn-success btn-block btn-sm">{% trans "Apply" %}</button></form>'
         t = template.Template(s)
-        c = template.Context({'form':form, 'action_url': self.model_admin_url('patch', self.org_obj.pk)})
+        c = template.Context({'form': form, 'action_url': self.model_admin_url('patch', self.org_obj.pk)})
 
         return HttpResponse(t.render(c))
 
-
     @filter_hook
     @csrf_protect_m
-    @transaction.commit_on_success
+    @transaction.atomic
     def post(self, request, object_id):
         model_fields = [f.name for f in self.opts.fields]
         fields = [f for f in request.POST.keys() if f in model_fields]
         defaults = {
-            "form": forms.ModelForm,
+            "form": self.form,
             "fields": fields,
             "formfield_callback": self.formfield_for_dbfield,
         }

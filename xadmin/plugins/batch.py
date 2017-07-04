@@ -5,7 +5,7 @@ from django.db import models
 from django.core.exceptions import PermissionDenied
 from django.forms.models import modelform_factory
 from django.template.response import TemplateResponse
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _, ugettext_lazy
 from xadmin.layout import FormHelper, Layout, Fieldset, Container, Col
@@ -16,10 +16,10 @@ from xadmin.views.edit import ModelFormAdminView
 
 BATCH_CHECKBOX_NAME = '_batch_change_fields'
 
+
 class ChangeFieldWidgetWrapper(forms.Widget):
 
     def __init__(self, widget):
-        self.is_hidden = widget.is_hidden
         self.needs_multipart_form = widget.needs_multipart_form
         self.attrs = widget.attrs
         self.widget = widget
@@ -40,9 +40,9 @@ class ChangeFieldWidgetWrapper(forms.Widget):
         output = []
         is_required = self.widget.is_required
         output.append(u'<label class="btn btn-info btn-xs">'
-            '<input type="checkbox" class="batch-field-checkbox" name="%s" value="%s"%s/> %s</label>' % 
+            '<input type="checkbox" class="batch-field-checkbox" name="%s" value="%s"%s/> %s</label>' %
             (BATCH_CHECKBOX_NAME, name, (is_required and ' checked="checked"' or ''), _('Change this field')))
-        output.extend([('<div class="control-wrap" style="margin-top: 10px;%s" id="id_%s_wrap_container">' % 
+        output.extend([('<div class="control-wrap" style="margin-top: 10px;%s" id="id_%s_wrap_container">' %
             ((not is_required and 'display: none;' or ''), name)),
             self.widget.render(name, value, attrs), '</div>'])
         return mark_safe(u''.join(output))
@@ -74,13 +74,12 @@ class BatchChangeAction(BaseActionView):
         n = queryset.count()
 
         data = {}
-        for f in self.opts.fields:
+        fields = self.opts.fields + self.opts.many_to_many
+        for f in fields:
             if not f.editable or isinstance(f, models.AutoField) \
                     or not f.name in cleaned_data:
                 continue
-            value = cleaned_data[f.name]
-            if value:
-                data[f] = value
+            data[f] = cleaned_data[f.name]
 
         if n:
             for obj in queryset:
@@ -123,15 +122,16 @@ class BatchChangeAction(BaseActionView):
 
         helper = FormHelper()
         helper.form_tag = False
-        helper.add_layout(Layout(Container(Col('full', 
+        helper.include_media = False
+        helper.add_layout(Layout(Container(Col('full',
             Fieldset("", *self.form_obj.fields.keys(), css_class="unsort no_title"), horizontal=True, span=12)
         )))
         self.form_obj.helper = helper
         count = len(queryset)
         if count == 1:
-            objects_name = force_unicode(self.opts.verbose_name)
+            objects_name = force_text(self.opts.verbose_name)
         else:
-            objects_name = force_unicode(self.opts.verbose_name_plural)
+            objects_name = force_text(self.opts.verbose_name_plural)
 
         context = self.get_context()
         context.update({
@@ -146,7 +146,7 @@ class BatchChangeAction(BaseActionView):
         })
 
         return TemplateResponse(self.request, self.batch_change_form_template or
-                                self.get_template_list('views/batch_change_form.html'), context, current_app=self.admin_site.name)
+                                self.get_template_list('views/batch_change_form.html'), context)
 
     @filter_hook
     def get_media(self):

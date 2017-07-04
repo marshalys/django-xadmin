@@ -1,12 +1,19 @@
-from django.conf.urls import patterns, include, url
+# -*- coding: utf-8 -*-
+from django.conf.urls import include, url
 
 # Uncomment the next two lines to enable the admin:
 import xadmin
 xadmin.autodiscover()
 
-# from xadmin.plugins import xversion
-# xversion.register_models()
+# version模块自动注册需要版本控制的 Model
+from xadmin.plugins import xversion
+xversion.register_models()
 
-urlpatterns = patterns('',
-                       url(r'', include(xadmin.site.urls)),
-                       )
+from django.contrib import admin
+
+urlpatterns = [
+    url(r'xadmin/', include(xadmin.site.urls)),
+    url(r'^admin/', include(admin.site.urls)),
+    url(r'^', include(xadmin.site.urls))
+]
+

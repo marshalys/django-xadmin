@@ -1,7 +1,12 @@
 (function($) {
    
   $(function(){
-
+    
+	// filter
+    $('.filter-multiselect input[type=checkbox]').click(function(e){
+    	window.location.href = $(this).parent().attr('href');
+    });
+    
     // menber filter
     $('.filter-number .remove').click(function(e){
       $(this).parent().parent().find('input[type="number"]').val('');
@@ -21,8 +26,8 @@
 
     $('.menu-date-range form').each(function(){
       var el = $(this);
-      var start_date = el.find('.calendar.date-start').datepicker({format: $.date_local.dateJSFormat, language: 'xadmin'});
-      var end_date = el.find('.calendar.date-end').datepicker({format: $.date_local.dateJSFormat, language: 'xadmin'});
+      var start_date = el.find('.calendar.date-start').datepicker({format: 'yyyy-mm-dd', language: 'xadmin'});
+      var end_date = el.find('.calendar.date-end').datepicker({format: 'yyyy-mm-dd', language: 'xadmin'});
       
       var checkAvailable = function(){
         if(start_date.data('datepicker').getDate().valueOf() <= end_date.data('datepicker').getDate().valueOf()){

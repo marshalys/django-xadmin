@@ -1,7 +1,7 @@
-from django import forms
-from django.utils.datastructures import SortedDict
+from collections import OrderedDict
+from django.forms.utils import ErrorDict
 from django.utils.html import escape
-from django.utils.encoding import force_unicode
+from django.utils.encoding import force_text
 from xadmin.sites import site
 from xadmin.views import BaseAdminPlugin, ListAdminView, ModelFormAdminView, DetailAdminView
 
@@ -12,15 +12,22 @@ NON_FIELD_ERRORS = '__all__'
 class BaseAjaxPlugin(BaseAdminPlugin):
 
     def init_request(self, *args, **kwargs):
-        return bool(self.request.is_ajax() or self.request.REQUEST.get('_ajax'))
+        return bool(self.request.is_ajax() or self.request.GET.get('_ajax'))
 
 
 class AjaxListPlugin(BaseAjaxPlugin):
+    
+    def get_list_display(self,list_display):
+        list_fields = [field for field in self.request.GET.get('_fields',"").split(",") 
+                                if field.strip() != ""]
+        if list_fields:
+            return list_fields
+        return list_display
 
     def get_result_list(self, response):
         av = self.admin_view
-        base_fields = av.base_list_display
-        headers = dict([(c.field_name, force_unicode(c.text)) for c in av.result_headers(
+        base_fields = self.get_list_display(av.base_list_display)
+        headers = dict([(c.field_name, force_text(c.text)) for c in av.result_headers(
         ).cells if c.field_name in base_fields])
 
         objects = [dict([(o.field_name, escape(str(o.value))) for i, o in
@@ -30,7 +37,7 @@ class AjaxListPlugin(BaseAjaxPlugin):
         return self.render_response({'headers': headers, 'objects': objects, 'total_count': av.result_count, 'has_more': av.has_more})
 
 
-class JsonErrorDict(forms.util.ErrorDict):
+class JsonErrorDict(ErrorDict):
 
     def __init__(self, errors, form):
         super(JsonErrorDict, self).__init__(errors)
@@ -85,7 +92,7 @@ class AjaxDetailPlugin(BaseAjaxPlugin):
             result = self.admin_view.get_field_result(f)
             results.append((result.label, result.val))
 
-        return self.render_response(SortedDict(results))
+        return self.render_response(OrderedDict(results))
 
 site.register_plugin(AjaxListPlugin, ListAdminView)
 site.register_plugin(AjaxFormPlugin, ModelFormAdminView)

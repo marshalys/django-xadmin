@@ -1,10 +1,10 @@
 {% extends base_template %}
 {% load i18n %}
-{% load url from future %}
+
 
 {% block breadcrumbs %}
 <div class="breadcrumbs">
-<a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+<a href="{% url 'xadmin:index' %}">{% trans 'Home' %}</a>
 &rsaquo; {% trans 'Server error' %}
 </div>
 {% endblock %}

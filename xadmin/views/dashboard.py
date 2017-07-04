@@ -1,15 +1,15 @@
 from django import forms
+from django.apps import apps
 from django.core.exceptions import PermissionDenied
-from django.core.urlresolvers import reverse
-from django.db import models
+from django.core.urlresolvers import reverse, NoReverseMatch
+from django.template.context_processors import csrf
 from django.db.models.base import ModelBase
 from django.forms.forms import DeclarativeFieldsMetaclass
-from django.forms.util import flatatt
+from django.forms.utils import flatatt
 from django.template import loader
 from django.http import Http404
-from django.template.context import RequestContext
 from django.test.client import RequestFactory
-from django.utils.encoding import force_unicode, smart_unicode
+from django.utils.encoding import force_text, smart_text
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
@@ -18,11 +18,12 @@ from django.views.decorators.cache import never_cache
 from xadmin import widgets as exwidgets
 from xadmin.layout import FormHelper
 from xadmin.models import UserSettings, UserWidget
+from xadmin.plugins.utils import get_context_dict
 from xadmin.sites import site
 from xadmin.views.base import CommAdminView, ModelAdminView, filter_hook, csrf_protect_m
 from xadmin.views.edit import CreateAdminView
 from xadmin.views.list import ListAdminView
-from xadmin.util import unquote
+from xadmin.util import unquote, DJANGO_11
 import copy
 
 
@@ -35,15 +36,18 @@ class WidgetTypeSelect(forms.Widget):
     def render(self, name, value, attrs=None):
         if value is None:
             value = ''
-        final_attrs = self.build_attrs(attrs, name=name)
+        if DJANGO_11:
+            final_attrs = self.build_attrs(attrs, extra_attrs={'name': name})
+        else:
+            final_attrs = self.build_attrs(attrs, name=name)
         final_attrs['class'] = 'nav nav-pills nav-stacked'
         output = [u'<ul%s>' % flatatt(final_attrs)]
-        options = self.render_options(force_unicode(value), final_attrs['id'])
+        options = self.render_options(force_text(value), final_attrs['id'])
         if options:
             output.append(options)
         output.append(u'</ul>')
         output.append('<input type="hidden" id="%s_input" name="%s" value="%s"/>' %
-                     (final_attrs['id'], name, force_unicode(value)))
+                      (final_attrs['id'], name, force_text(value)))
         return mark_safe(u'\n'.join(output))
 
     def render_option(self, selected_choice, widget, id):
@@ -70,7 +74,7 @@ class WidgetTypeSelect(forms.Widget):
 
 class UserWidgetAdmin(object):
 
-    model_icon = 'dashboard'
+    model_icon = 'fa fa-dashboard'
     list_display = ('widget_type', 'page_id', 'user')
     list_filter = ['user', 'widget_type', 'page_id']
     list_display_links = ('widget_type',)
@@ -178,7 +182,7 @@ class BaseWidget(forms.Form):
     template = 'xadmin/widgets/base.html'
     description = 'Base Widget, don\'t use it.'
     widget_title = None
-    widget_icon = 'icon-plus-sign-alt'
+    widget_icon = 'fa fa-plus-square'
     widget_type = 'base'
     base_title = None
 
@@ -201,6 +205,7 @@ class BaseWidget(forms.Form):
     def setup(self):
         helper = FormHelper()
         helper.form_tag = False
+        helper.include_media = False
         self.helper = helper
 
         self.id = self.cleaned_data['id']
@@ -211,10 +216,11 @@ class BaseWidget(forms.Form):
 
     @property
     def widget(self):
-        context = {'widget_id': self.id, 'widget_title': self.title,
-            'widget_type': self.widget_type, 'form': self, 'widget': self}
+        context = {'widget_id': self.id, 'widget_title': self.title, 'widget_icon': self.widget_icon,
+                   'widget_type': self.widget_type, 'form': self, 'widget': self}
+        context.update(csrf(self.request))
         self.context(context)
-        return loader.render_to_string(self.template, context, context_instance=RequestContext(self.request))
+        return loader.render_to_string(self.template, context)
 
     def context(self, context):
         pass
@@ -244,6 +250,7 @@ class BaseWidget(forms.Form):
 @widget_manager.register
 class HtmlWidget(BaseWidget):
     widget_type = 'html'
+    widget_icon = 'fa fa-file-o'
     description = _(
         u'Html Content Widget, can write any html content in widget.')
 
@@ -264,7 +271,7 @@ class ModelChoiceIterator(object):
     def __iter__(self):
         from xadmin import site as g_admin_site
         for m, ma in g_admin_site._registry.items():
-            yield ('%s.%s' % (m._meta.app_label, m._meta.module_name),
+            yield ('%s.%s' % (m._meta.app_label, m._meta.model_name),
                    m._meta.verbose_name)
 
 
@@ -291,17 +298,17 @@ class ModelChoiceField(forms.ChoiceField):
         if isinstance(value, ModelBase):
             return value
         app_label, model_name = value.lower().split('.')
-        return models.get_model(app_label, model_name)
+        return apps.get_model(app_label, model_name)
 
     def prepare_value(self, value):
         if isinstance(value, ModelBase):
-            value = '%s.%s' % (value._meta.app_label, value._meta.module_name)
+            value = '%s.%s' % (value._meta.app_label, value._meta.model_name)
         return value
 
     def valid_value(self, value):
         value = self.prepare_value(value)
         for k, v in self.choices:
-            if value == smart_unicode(k):
+            if value == smart_text(k):
                 return True
         return False
 
@@ -309,7 +316,7 @@ class ModelChoiceField(forms.ChoiceField):
 class ModelBaseWidget(BaseWidget):
 
     app_label = None
-    module_name = None
+    model_name = None
     model_perm = 'change'
     model = ModelChoiceField(label=_(u'Target Model'), widget=exwidgets.AdminSelectWidget)
 
@@ -320,7 +327,7 @@ class ModelBaseWidget(BaseWidget):
     def setup(self):
         self.model = self.cleaned_data['model']
         self.app_label = self.model._meta.app_label
-        self.module_name = self.model._meta.module_name
+        self.model_name = self.model._meta.model_name
 
         super(ModelBaseWidget, self).setup()
 
@@ -333,7 +340,7 @@ class ModelBaseWidget(BaseWidget):
     def model_admin_url(self, name, *args, **kwargs):
         return reverse(
             "%s:%s_%s_%s" % (self.admin_site.app_name, self.app_label,
-            self.module_name, name), args=args, kwargs=kwargs)
+                             self.model_name, name), args=args, kwargs=kwargs)
 
 
 class PartialBaseWidget(BaseWidget):
@@ -365,6 +372,7 @@ class QuickBtnWidget(BaseWidget):
     description = _(u'Quick button Widget, quickly open any page.')
     template = "xadmin/widgets/qbutton.html"
     base_title = _(u"Quick Buttons")
+    widget_icon = 'fa fa-caret-square-o-right'
 
     def convert(self, data):
         self.q_btns = data.pop('btns', [])
@@ -373,7 +381,7 @@ class QuickBtnWidget(BaseWidget):
         if isinstance(model_or_label, ModelBase):
             return model_or_label
         else:
-            return models.get_model(*model_or_label.lower().split('.'))
+            return apps.get_model(*model_or_label.lower().split('.'))
 
     def context(self, context):
         btns = []
@@ -381,14 +389,17 @@ class QuickBtnWidget(BaseWidget):
             btn = {}
             if 'model' in b:
                 model = self.get_model(b['model'])
-                if not self.user.has_perm("%s.view_%s" % (model._meta.app_label, model._meta.module_name)):
+                if not self.user.has_perm("%s.view_%s" % (model._meta.app_label, model._meta.model_name)):
                     continue
                 btn['url'] = reverse("%s:%s_%s_%s" % (self.admin_site.app_name, model._meta.app_label,
-                                                      model._meta.module_name, b.get('view', 'changelist')))
+                                                      model._meta.model_name, b.get('view', 'changelist')))
                 btn['title'] = model._meta.verbose_name
                 btn['icon'] = self.dashboard.get_model_icon(model)
             else:
-                btn['url'] = b['url']
+                try:
+                    btn['url'] = reverse(b['url'])
+                except NoReverseMatch:
+                    btn['url'] = b['url']
 
             if 'title' in b:
                 btn['title'] = b['title']
@@ -408,6 +419,7 @@ class ListWidget(ModelBaseWidget, PartialBaseWidget):
     description = _(u'Any Objects list Widget.')
     template = "xadmin/widgets/list.html"
     model_perm = 'view'
+    widget_icon = 'fa fa-align-justify'
 
     def convert(self, data):
         self.list_params = data.pop('params', {})
@@ -447,6 +459,7 @@ class AddFormWidget(ModelBaseWidget, PartialBaseWidget):
     description = _(u'Add any model object Widget.')
     template = "xadmin/widgets/addform.html"
     model_perm = 'add'
+    widget_icon = 'fa fa-plus'
 
     def setup(self):
         super(AddFormWidget, self).setup()
@@ -462,6 +475,7 @@ class AddFormWidget(ModelBaseWidget, PartialBaseWidget):
     def context(self, context):
         helper = FormHelper()
         helper.form_tag = False
+        helper.include_media = False
 
         context.update({
             'addform': self.add_view.form_obj,
@@ -547,7 +561,7 @@ class Dashboard(CommAdminView):
                                 widget = user_widgets.get(int(wid))
                                 if widget:
                                     ws.append(self.get_widget(widget))
-                            except Exception, e:
+                            except Exception as e:
                                 import logging
                                 logging.error(e, exc_info=True)
                         widgets.append(ws)
@@ -568,7 +582,7 @@ class Dashboard(CommAdminView):
             'portal_key': self.get_portal_key(),
             'columns': [('col-sm-%d' % int(12 / len(self.widgets)), ws) for ws in self.widgets],
             'has_add_widget_permission': self.has_model_perm(UserWidget, 'add') and self.widget_customiz,
-            'add_widget_url': self.get_admin_url('%s_%s_add' % (UserWidget._meta.app_label, UserWidget._meta.module_name)) +
+            'add_widget_url': self.get_admin_url('%s_%s_add' % (UserWidget._meta.app_label, UserWidget._meta.model_name)) +
             "?user=%s&page_id=%s&_redirect=%s" % (self.user.id, self.get_page_id(), urlquote(self.request.get_full_path()))
         }
         context = super(Dashboard, self).get_context()
@@ -626,7 +640,7 @@ class ModelDashboard(Dashboard, ModelAdminView):
 
     @filter_hook
     def get_title(self):
-        return self.title % force_unicode(self.obj)
+        return self.title % force_text(self.obj)
 
     def init_request(self, object_id, *args, **kwargs):
         self.obj = self.get_object(unquote(object_id))
@@ -636,7 +650,7 @@ class ModelDashboard(Dashboard, ModelAdminView):
 
         if self.obj is None:
             raise Http404(_('%(name)s object with primary key %(key)r does not exist.') %
-                          {'name': force_unicode(self.opts.verbose_name), 'key': escape(object_id)})
+                          {'name': force_text(self.opts.verbose_name), 'key': escape(object_id)})
 
     @filter_hook
     def get_context(self):

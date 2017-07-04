@@ -67,11 +67,11 @@
 
     if(this.content == null){
       var that = this
-      $el.find('>i').removeClass('icon-edit').addClass('icon-spinner icon-spin')
+      $el.find('>i').removeClass('fa fa-edit').addClass('fa fa-spinner fa-spin')
       $.ajax({
         url: $el.data('editable-loadurl'),
         success: function(content){
-          $el.find('>i').removeClass('icon-spinner icon-spin').addClass('icon-edit')
+          $el.find('>i').removeClass('fa fa-spinner fa-spin').addClass('fa fa-edit')
           that.content = content
           that.toggle()
         },
@@ -94,7 +94,7 @@
     $form.submit($.proxy(this.submit, this))
 
     this.$form = $form
-    this.$mask = $('<div class="mask"><h2 style="text-align:center;"><i class="icon-spinner icon-spin icon-large"></i></h2></div>')
+    this.$mask = $('<div class="mask"><h2 style="text-align:center;"><i class="fa-spinner fa-spin fa fa-large"></i></h2></div>')
     $tip.find('.popover-content').prepend(this.$mask)
 
     $tip.removeClass('fade top bottom left right in')
@@ -127,6 +127,7 @@
       $.when(this.save())
       .done($.proxy(function(data) {
         this.$mask.hide()
+        this.$mask.parents('.popover').hide()
         if(data['result'] != 'success' && data['errors']){
           var err_html = []
           for (var i = data['errors'].length - 1; i >= 0; i--) {
@@ -139,11 +140,12 @@
           this.$form.find('.controls').append(err_html.join('\n'))
         } else {
           this.$text.html(data['new_html'][this.field])
-          this.hide()
+          this.leave(this)
         }
       }, this))
       .fail($.proxy(function(xhr) {
         this.$mask.hide()
+        this.$mask.parents('.popover').hide()
         alert(typeof xhr === 'string' ? xhr : xhr.responseText || xhr.statusText || 'Unknown error!');
       }, this))
   }

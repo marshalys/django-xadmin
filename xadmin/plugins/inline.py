@@ -2,11 +2,17 @@ import copy
 import inspect
 from django import forms
 from django.forms.formsets import all_valid, DELETION_FIELD_NAME
-from django.forms.models import inlineformset_factory, BaseInlineFormSet
-from django.contrib.contenttypes.generic import BaseGenericInlineFormSet, generic_inlineformset_factory
+from django.forms.models import inlineformset_factory, BaseInlineFormSet, modelform_defines_fields
+from django.contrib.contenttypes.forms import BaseGenericInlineFormSet, generic_inlineformset_factory
 from django.template import loader
 from django.template.loader import render_to_string
+from django.contrib.auth import get_permission_codename
+from django.utils import six
+from django.utils.encoding import smart_text
+from crispy_forms.utils import TEMPLATE_PACK
+
 from xadmin.layout import FormHelper, Layout, flatatt, Container, Column, Field, Fieldset
+from xadmin.plugins.utils import get_context_dict
 from xadmin.sites import site
 from xadmin.views import BaseAdminPlugin, ModelFormAdminView, DetailAdminView, filter_hook
 
@@ -20,23 +26,23 @@ class ShowField(Field):
         if admin_view.style == 'table':
             self.template = "xadmin/layout/field_value_td.html"
 
-    def render(self, form, form_style, context):
+    def render(self, form, form_style, context, template_pack=TEMPLATE_PACK, **kwargs):
         html = ''
         detail = form.detail
         for field in self.fields:
             if not isinstance(form.fields[field].widget, forms.HiddenInput):
                 result = detail.get_field_result(field)
                 html += loader.render_to_string(
-                    self.template, {'field': form[field], 'result': result})
+                    self.template, context={'field': form[field], 'result': result})
         return html
 
 
 class DeleteField(Field):
 
-    def render(self, form, form_style, context):
+    def render(self, form, form_style, context, template_pack=TEMPLATE_PACK, **kwargs):
         if form.instance.pk:
             self.attrs['type'] = 'hidden'
-            return super(DeleteField, self).render(form, form_style, context)
+            return super(DeleteField, self).render(form, form_style, context, template_pack=TEMPLATE_PACK, **kwargs)
         else:
             return ""
 
@@ -109,10 +115,11 @@ style_manager.register_style("table", TableInlineStyle)
 
 def replace_field_to_value(layout, av):
     if layout:
+        cls_str = str if six.PY3 else basestring
         for i, lo in enumerate(layout.fields):
             if isinstance(lo, Field) or issubclass(lo.__class__, Field):
                 layout.fields[i] = ShowField(av, *lo.fields, **lo.attrs)
-            elif isinstance(lo, basestring):
+            elif isinstance(lo, cls_str):
                 layout.fields[i] = ShowField(av, lo)
             elif hasattr(lo, 'get_field_names'):
                 replace_field_to_value(lo, av)
@@ -157,6 +164,7 @@ class InlineModelAdmin(ModelFormAdminView):
             "form": self.form,
             "formset": self.formset,
             "fk_name": self.fk_name,
+            'fields': forms.ALL_FIELDS,
             "exclude": exclude,
             "formfield_callback": self.formfield_for_dbfield,
             "extra": self.extra,
@@ -164,6 +172,7 @@ class InlineModelAdmin(ModelFormAdminView):
             "can_delete": can_delete,
         }
         defaults.update(kwargs)
+
         return inlineformset_factory(self.parent_model, self.model, **defaults)
 
     @filter_hook
@@ -183,6 +192,7 @@ class InlineModelAdmin(ModelFormAdminView):
 
         helper = FormHelper()
         helper.form_tag = False
+        helper.include_media = False
         # override form method to prevent render csrf_token in inline forms, see template 'bootstrap/whole_uni_form.html'
         helper.form_method = 'get'
 
@@ -221,11 +231,14 @@ class InlineModelAdmin(ModelFormAdminView):
                         value = None
                         label = None
                         if readonly_field in inst._meta.get_all_field_names():
-                            label = inst._meta.get_field_by_name(readonly_field)[0].verbose_name
-                            value = unicode(getattr(inst, readonly_field))
+                            label = inst._meta.get_field(readonly_field).verbose_name
+                            value = smart_text(getattr(inst, readonly_field))
                         elif inspect.ismethod(getattr(inst, readonly_field, None)):
                             value = getattr(inst, readonly_field)()
                             label = getattr(getattr(inst, readonly_field), 'short_description', readonly_field)
+                        elif inspect.ismethod(getattr(self, readonly_field, None)):
+                            value = getattr(self, readonly_field)(inst)
+                            label = getattr(getattr(self, readonly_field), 'short_description', readonly_field)
                         if value:
                             form.readonly_fields.append({'label': label, 'contents': value})
         return instance
@@ -247,8 +260,9 @@ class InlineModelAdmin(ModelFormAdminView):
     def has_add_permission(self):
         if self.opts.auto_created:
             return self.has_change_permission()
-        return self.user.has_perm(
-            self.opts.app_label + '.' + self.opts.get_add_permission())
+
+        codename = get_permission_codename('add', self.opts)
+        return self.user.has_perm("%s.%s" % (self.opts.app_label, codename))
 
     def has_change_permission(self):
         opts = self.opts
@@ -257,14 +271,16 @@ class InlineModelAdmin(ModelFormAdminView):
                 if field.rel and field.rel.to != self.parent_model:
                     opts = field.rel.to._meta
                     break
-        return self.user.has_perm(
-            opts.app_label + '.' + opts.get_change_permission())
+
+        codename = get_permission_codename('change', opts)
+        return self.user.has_perm("%s.%s" % (opts.app_label, codename))
 
     def has_delete_permission(self):
         if self.opts.auto_created:
             return self.has_change_permission()
-        return self.user.has_perm(
-            self.opts.app_label + '.' + self.opts.get_delete_permission())
+
+        codename = get_permission_codename('delete', self.opts)
+        return self.user.has_perm("%s.%s" % (self.opts.app_label, codename))
 
 
 class GenericInlineModelAdmin(InlineModelAdmin):
@@ -295,9 +311,11 @@ class GenericInlineModelAdmin(InlineModelAdmin):
             "can_delete": can_delete,
             "can_order": False,
             "max_num": self.max_num,
-            "exclude": exclude
+            "exclude": exclude,
+            'fields': forms.ALL_FIELDS
         }
         defaults.update(kwargs)
+
         return generic_inlineformset_factory(self.model, **defaults)
 
 
@@ -318,10 +336,15 @@ class InlineFormset(Fieldset):
         self.flat_attrs = flatatt(kwargs)
         self.extra_attrs = formset.style.get_attrs()
 
-    def render(self, form, form_style, context):
-        return render_to_string(
-            self.template, dict({'formset': self, 'prefix': self.formset.prefix, 'inline_style': self.inline_style}, **self.extra_attrs),
-            context_instance=context)
+    def render(self, form, form_style, context, template_pack=TEMPLATE_PACK, **kwargs):
+        context = get_context_dict(context)
+        context.update(dict(
+            formset=self,
+            prefix=self.formset.prefix,
+            inline_style=self.inline_style,
+            **self.extra_attrs
+        ))
+        return render_to_string(self.template, context)
 
 
 class Inline(Fieldset):
@@ -329,8 +352,9 @@ class Inline(Fieldset):
     def __init__(self, rel_model):
         self.model = rel_model
         self.fields = []
+        super(Inline,self).__init__(legend="")
 
-    def render(self, form, form_style, context):
+    def render(self, form, form_style, context, template_pack=TEMPLATE_PACK, **kwargs):
         return ""
 
 
@@ -374,6 +398,7 @@ class InlineFormsetPlugin(BaseAdminPlugin):
                     inline.max_num = 0
                 inline_instances.append(inline)
             self._inline_instances = inline_instances
+
         return self._inline_instances
 
     def instance_forms(self, ret):
@@ -406,8 +431,8 @@ class InlineFormsetPlugin(BaseAdminPlugin):
 
     def get_form_layout(self, layout):
         allow_blank = isinstance(self.admin_view, DetailAdminView)
-        fs = dict(
-            [(f.model, InlineFormset(f, allow_blank)) for f in self.formsets])
+        # fixed #176 bug, change dict to list
+        fs = [(f.model, InlineFormset(f, allow_blank)) for f in self.formsets]
         replace_inline_objects(layout, fs)
 
         if fs:
@@ -417,8 +442,9 @@ class InlineFormsetPlugin(BaseAdminPlugin):
             if not container:
                 container = layout
 
-            for fs in fs.values():
-                container.append(fs)
+            # fixed #176 bug, change dict to list
+            for key, value in fs:
+                container.append(value)
 
         return layout
 
@@ -437,7 +463,7 @@ class InlineFormsetPlugin(BaseAdminPlugin):
             replace_field_to_value(formset.helper.layout, inline)
             model = inline.model
             opts = model._meta
-            fake_admin_class = type(str('%s%sFakeAdmin' % (opts.app_label, opts.module_name)), (object, ), {'model': model})
+            fake_admin_class = type(str('%s%sFakeAdmin' % (opts.app_label, opts.model_name)), (object, ), {'model': model})
             for form in formset.forms:
                 instance = form.instance
                 if instance.pk:

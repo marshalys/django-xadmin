@@ -44,8 +44,8 @@ class RelatedFieldWidgetWrapper(forms.Widget):
     This class is a wrapper to a given widget to add the add icon for the
     admin interface.
     """
+
     def __init__(self, widget, rel, add_url, rel_add_url):
-        self.is_hidden = widget.is_hidden
         self.needs_multipart_form = widget.needs_multipart_form
         self.attrs = widget.attrs
         self.choices = widget.choices
@@ -55,6 +55,9 @@ class RelatedFieldWidgetWrapper(forms.Widget):
 
         self.add_url = add_url
         self.rel_add_url = rel_add_url
+
+        if hasattr(self, 'input_type'):
+            self.input_type = widget.input_type
 
     def __deepcopy__(self, memo):
         obj = copy.copy(self)
@@ -68,16 +71,16 @@ class RelatedFieldWidgetWrapper(forms.Widget):
         media = self.widget.media + vendor('xadmin.plugin.quick-form.js')
         return media
 
-    def render(self, name, value, *args, **kwargs):
+    def render(self, name, value, renderer=None, *args, **kwargs):
         self.widget.choices = self.choices
         output = []
         if self.add_url:
-            output.append(u'<a href="%s" title="%s" class="btn btn-primary btn-sm btn-ajax pull-right" data-for-id="id_%s" data-refresh-url="%s"><i class="icon-plus"></i></a>'
+            output.append(u'<a href="%s" title="%s" class="btn btn-primary btn-sm btn-ajax pull-right" data-for-id="id_%s" data-refresh-url="%s"><i class="fa fa-plus"></i></a>'
                           % (
                               self.add_url, (_('Create New %s') % self.rel.to._meta.verbose_name), name,
                               "%s?_field=%s&%s=" % (self.rel_add_url, name, name)))
         output.extend(['<div class="control-wrap" id="id_%s_wrap_container">' % name,
-                  self.widget.render(name, value, *args, **kwargs), '</div>'])
+                       self.widget.render(name, value, *args, **kwargs), '</div>'])
         return mark_safe(u''.join(output))
 
     def build_attrs(self, extra_attrs=None, **kwargs):
